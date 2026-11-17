@@ -4,7 +4,10 @@
 
 PYTHON := $(shell if [ -x $(HOME)/ai_env/bin/python ]; then echo $(HOME)/ai_env/bin/python; else echo python3; fi)
 
-.PHONY: demo test eval gates all clean
+.PHONY: demo test eval gates pillars all clean
+
+pillars:
+	$(PYTHON) -m pip install -e ".[pillars]" || echo "pillars unavailable offline, using stdlib fallback"
 
 demo:
 	$(PYTHON) demo/demo.py
