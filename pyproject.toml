@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-verified-agent"
+version = "0.1.0"
+description = "End-to-end verified agent demo: inter-agent memory (agent-context-bridge) + cited-or-refused RAG (cited-rag) + CI safety gates (llm-eval-ci). Stdlib only, offline, no API key."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "shenn667", email = "lehdev@yandex.com" }]
+keywords = ["agents", "rag", "citations", "evals", "offline", "claude"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[project.urls]
+Homepage = "https://github.com/shenn667/claude-verified-agent"

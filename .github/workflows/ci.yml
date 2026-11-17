@@ -1,0 +1,61 @@
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package (+ pytest)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run tests (offline, no secrets)
+        run: python -m pytest -v
+
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Install pillar repos (best effort)
+        run: |
+          pip install "git+https://github.com/shenn667/llm-eval-ci.git" || echo "pillar llm-eval-ci unavailable, using stdlib fallback gate"
+          pip install "git+https://github.com/shenn667/cited-rag.git" || echo "pillar cited-rag unavailable, using stdlib fallback RAG"
+          pip install "git+https://github.com/shenn667/agent-context-bridge.git" || echo "pillar agent-context-bridge unavailable, using stdlib fallback memory"
+      - name: Gate — non_regression suite
+        run: |
+          if command -v llm-eval >/dev/null 2>&1; then
+            llm-eval run evals/non_regression.json --report report.md --json report.json
+          else
+            python -m verified_agent.gates run evals/non_regression.json
+          fi
+      - name: Gate — schema suite
+        run: |
+          if command -v llm-eval >/dev/null 2>&1; then
+            llm-eval run evals/schema.json --report report.md --json report.json
+          else
+            python -m verified_agent.gates run evals/schema.json
+          fi
+      - name: Gate — tripwires suite (PII + injection)
+        run: |
+          if command -v llm-eval >/dev/null 2>&1; then
+            llm-eval run evals/tripwires.json --report report.md --json report.json
+          else
+            python -m verified_agent.gates run evals/tripwires.json
+          fi

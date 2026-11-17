@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+dist/
+build/
+.venv/
+.pytest_cache/
+.cited-rag/
+.agent_bridge/
+report.md
+report.json
+*.tmp
+.DS_Store/
