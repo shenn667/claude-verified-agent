@@ -85,6 +85,14 @@ CI (`.github/workflows/ci.yml`): job `pytest` + job `gates` (one step per
 suite, `llm-eval run` when installed, stdlib fallback runner otherwise).
 Any red gate fails the build.
 
+## Links
+
+- Dataset (Hugging Face): https://huggingface.co/datasets/SHENNN667/cited-rag-golden-52
+  (published under namespace `SHENNN667` — no write rights on `shenn667`;
+  the lowercase `shenn667/...` URL returns 401, do not use it as the main link)
+- Eval page: https://shenn667.github.io/eval/ (live, deployed from
+  `shenn667/shenn667.github.io` main branch)
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
