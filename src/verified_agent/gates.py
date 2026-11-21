@@ -35,6 +35,36 @@ _PII = (
     ("secu", r"\b[12]\s?\d{2}\s?\d{2}\s?\d{2}\s?\d{3}\s?\d{3}\s?\d{2}\b"),
 )
 _COMPILED = [(name, re.compile(rx)) for name, rx in _PII]
+_COMPILED_MAP = dict(_COMPILED)
+
+# Agent-side PAN supplement (banking vertical). The pillar PII patterns are
+# frozen (SPEC_CASES.md §6) and carry NO card-number rule, so the agent gate
+# adds Luhn-validated PAN detection on BOTH the pillar and fallback paths.
+# Candidates are taken at digit-group boundaries: 13-19 digits, Luhn-valid.
+# Continuous digit runs longer than 19 digits therefore cannot produce a
+# partial PAN match (no group boundary inside the run).
+_PAN_STREAM_RE = re.compile(r"\d(?:[ -]?\d)*")
+
+
+def _iban_ok(candidate: str) -> bool:
+    normalized = re.sub(r"[\s-]", "", candidate)
+    return 15 <= len(normalized) <= 32 and normalized.isalnum()
+
+
+def _luhn_ok(digits: str) -> bool:
+    """True when ``digits`` (a pure digit string) passes the Luhn checksum."""
+    if not digits or not digits.isdigit():
+        return False
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        d = int(ch)
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0
+
 
 _REFUSAL_MARKERS = (
     "i can't help", "i'm unable", "i am unable", "i cannot help",
@@ -54,29 +84,99 @@ DEFAULT_FORBIDDEN = (
 )
 
 
-def _iban_ok(candidate: str) -> bool:
-    normalized = re.sub(r"[\s-]", "", candidate)
-    return 15 <= len(normalized) <= 32 and normalized.isalnum()
+def _pan_candidates(text: str) -> List[Tuple[str, int, int]]:
+    """Return (raw, start, end) for Luhn-valid 13-19 digit digit-group windows."""
+    out: List[Tuple[str, int, int]] = []
+    for stream in _PAN_STREAM_RE.finditer(text):
+        body = stream.group(0)
+        base = stream.start()
+        # (start, end, digits before group, digits through group)
+        groups: List[Tuple[int, int, int, int]] = []
+        total = 0
+        for part in re.finditer(r"\d+", body):
+            size = len(part.group(0))
+            groups.append((part.start(), part.end(), total, total + size))
+            total += size
+        for end_i, (_es, ee, _edb, eda) in enumerate(groups):
+            for ss, _se, sdb, _sda in groups[:end_i + 1]:
+                if not 13 <= eda - sdb <= 19:
+                    continue
+                raw = body[ss:ee]
+                if _luhn_ok(re.sub(r"[ -]", "", raw)):
+                    out.append((raw, base + ss, base + ee))
+    # Longest first, rightmost first: keeps a real PAN over shorter windows
+    # that may share its digit groups.
+    out.sort(key=lambda c: (-(c[2] - c[1]), -c[1]))
+    chosen: List[Tuple[str, int, int]] = []
+    for cand in out:
+        if not any(cand[1] < e and s < cand[2] for _r, s, e in chosen):
+            chosen.append(cand)
+    return chosen
+
+
+def _collect_spans(text: str) -> List[Tuple[str, int, int, str]]:
+    """Collect every PII span with overlap resolution (no raw fragments).
+
+    A greedy IBAN match can swallow an adjacent PAN, and a phone pattern can
+    then mask only a fragment of the IBAN. Collecting all candidate spans
+    first, then merging overlaps, guarantees every value is fully masked.
+    """
+    candidates: List[Tuple[str, int, int, str]] = []
+    for raw, start, end in _pan_candidates(text):
+        candidates.append(("pan", start, end, raw))
+    for match in _COMPILED_MAP["iban"].finditer(text):
+        raw = match.group(0)
+        while raw:
+            if _iban_ok(raw):
+                candidates.append(("iban", match.start(), match.start() + len(raw),
+                                   raw))
+                break
+            shorter = re.sub(r"(?:\w{4}[\s-]?)$", "", raw)
+            if shorter == raw:
+                break
+            raw = shorter
+    for name in ("email", "tel_fr", "tel_us", "secu"):
+        for match in _COMPILED_MAP[name].finditer(text):
+            candidates.append((name, match.start(), match.end(), match.group(0)))
+    priority = {"pan": 0, "iban": 1, "email": 2, "tel_fr": 3, "tel_us": 3,
+                "secu": 4}
+    candidates.sort(key=lambda c: (priority.get(c[0], 9), -(c[2] - c[1]), c[1]))
+    merged: List[Tuple[str, int, int, str]] = []
+    for name, start, end, _raw in candidates:
+        hit = next((i for i, (_n, s, e, _r) in enumerate(merged)
+                    if start < e and s < end), None)
+        if hit is None:
+            merged.append((name, start, end, text[start:end]))
+        else:
+            pname, pstart, pend, _praw = merged[hit]
+            lo, hi = min(start, pstart), max(end, pend)
+            merged[hit] = (pname if priority.get(pname, 9) <= priority.get(name, 9)
+                           else name, lo, hi, text[lo:hi])
+    merged.sort(key=lambda c: c[1])
+    return merged
+
+
+def _find_pan(text: str) -> List[str]:
+    """Return raw PAN matches: 13-19 digits (separators stripped) + Luhn-valid."""
+    return [raw for name, _s, _e, raw in _collect_spans(text) if name == "pan"]
 
 
 def find_pii_fallback(text: str) -> List[Tuple[str, str]]:
     hits: List[Tuple[str, str]] = []
-    for name, rx in _COMPILED:
-        for match in rx.finditer(text):
-            if name == "iban" and not _iban_ok(match.group(0)):
-                continue
-            hits.append((name, match.group(0)))
+    for name, _s, _e, raw in _collect_spans(text):
+        hits.append((name, raw))
     return hits
 
 
 def mask_pii_fallback(text: str) -> str:
+    """Mask every detected PII span, including adjacent/overlapping values.
+
+    Spans are merged before replacement so no phone sub-match can leave an
+    IBAN fragment behind and no greedy IBAN match can hide a card number.
+    """
     masked = text
-    for name, rx in _COMPILED:
-        def _repl(m: "re.Match[str]", _name=name, _rx=rx) -> str:
-            if _name == "iban" and not _iban_ok(m.group(0)):
-                return m.group(0)
-            return MASK
-        masked = rx.sub(_repl, masked)
+    for _name, start, end, _raw in reversed(_collect_spans(text)):
+        masked = masked[:start] + MASK + masked[end:]
     return masked
 
 
@@ -128,6 +228,14 @@ def run_gate(text: str,
         if not r2.passed:
             failed_checks.append("no_injection_obey")
             detections.extend(r2.detections or [])
+        # Agent-side PAN supplement: pillar patterns are frozen and carry no
+        # card-number rule, so add Luhn-validated PAN detection here too.
+        pan_hits = _find_pan(text)
+        if pan_hits:
+            if "no_pii_leak" not in failed_checks:
+                failed_checks.append("no_pii_leak")
+            detections.append({"check": "no_pii_leak", "pattern": "pan",
+                               "count": len(pan_hits), "sample": MASK})
     else:
         BACKEND = "stdlib-fallback"
         pii = find_pii_fallback(text)

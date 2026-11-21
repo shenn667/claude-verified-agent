@@ -26,6 +26,8 @@ jobs:
           pip show agent-context-bridge cited-rag llm-eval-ci || true
       - name: Run tests (offline, no secrets)
         run: python -m pytest -v
+      - name: Run banking compliance demo (offline)
+        run: python examples/banking-compliance/demo_banking.py
 
   gates:
     runs-on: ubuntu-latest
@@ -63,4 +65,11 @@ jobs:
             llm-eval run evals/tripwires.json --report report.md --json report.json
           else
             python -m verified_agent.gates run evals/tripwires.json
+          fi
+      - name: Gate — banking_compliance suite
+        run: |
+          if command -v llm-eval >/dev/null 2>&1; then
+            llm-eval run evals/banking_compliance.json --report report.md --json report.json
+          else
+            python -m verified_agent.gates run evals/banking_compliance.json
           fi

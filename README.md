@@ -15,8 +15,9 @@ regression by suite. Stdlib-only core, fully offline, no API key.
 ```bash
 pip install -e .
 make demo     # 1 command: cited answer + refusal + gate verdicts
-make test     # 14 contract tests (pytest, offline)
-make gates    # 3 llm-eval-ci suites, exit != 0 blocks CI
+make banking-demo  # banking & SecOps vertical: 4 asserted offline cases
+make test     # 48 contract tests (pytest, offline)
+make gates    # 4 llm-eval-ci suites, exit != 0 blocks CI
 ```
 
 ## Architecture
@@ -43,7 +44,7 @@ Each stage prefers its pillar implementation and degrades to a compact
 stdlib equivalent when the pillar is not installed (`backends` field of
 every answer states which implementation served each stage, so the demo
 output is auditable). Set `CVA_FORCE_FALLBACK=1` to exercise the portable
-path — the 14 tests pass identically on both paths.
+path — the 48 tests pass identically on both paths.
 
 ## The 3 pillars (used, not rewritten)
 
@@ -62,23 +63,73 @@ path — the 14 tests pass identically on both paths.
 | `evals/non_regression.json` | cited answers (contains + citation regex + PII-free), off-corpus refusal | 3/3 passed, exit 0 |
 | `evals/schema.json` | JSON payload contract (cited + refused shapes, budgets) | 2/2 passed, exit 0 |
 | `evals/tripwires.json` | PII request refused, injection-laced prompt refused | 2/2 passed, exit 0 |
+| `evals/banking_compliance.json` | banking cited answer, off-corpus refusal, PII gate, injection gate, masked memory | 5/5 passed, exit 0 |
 
-`pytest`: **14/14 passed** on the pillar path and **14/14 passed** with
+`pytest`: **48/48 passed** on the pillar path and **48/48 passed** with
 `CVA_FORCE_FALLBACK=1` (portable stdlib path): exact verbatim citations,
 refusal with zero citations, gate blocks PII/injection strings,
 injection-laced questions never obeyed, answer determinism, JSON contract,
-memory records, backend auditability.
+memory records, backend auditability. The count is 14 core contract tests
+(`tests/test_verified_agent.py`) plus 34 banking-compliance tests
+(`tests/test_banking_compliance.py`, 16 cases × 2 backends).
 
 The red path (a leaked PII string or an obeyed injection **fails** the
 gate, exit 1) is proven in `pytest`, not in the suites: the suites must
 stay green or CI blocks.
+
+## Banking & SecOps Compliance Use Case (B2B)
+
+A regulated-banking vertical built on the same verified pipeline, shipped
+under `examples/banking-compliance/`. The corpus is **100% synthetic** —
+four bilingual (FR + EN) markdown files for the fictional *Banque Exemple
+SA / Example Bank SA*. Every file opens with a `SYNTHETIC` header; there is
+**zero real enterprise data**, no real PII, and no actual regulatory text
+(the BCEAO-inspired audit policy is explicitly labelled synthetic).
+
+Topics: PCI DSS controls (AES-256 at rest, TLS 1.2+ in transit, PAN
+masking first-6/last-4, HSM key storage, 90-day key rotation), BCEAO-inspired
+audit logs (10-year retention, WORM integrity, NTP sync, maker/checker),
+a SecOps ransomware playbook (VLAN isolation, east-west blocking, forensic
+image before rebuild, RSSI/CISO escalation within 1 hour, 72-hour regulator
+notification), and IAM privileged access (mandatory bastion, phishing-resistant
+MFA, quarterly review, JIT elevation, session recording) ending in an
+assistant-secrecy section that serves as the injection tripwire target.
+
+The offline demo (`demo_banking.py`, tempfile workspace, no API key) runs
+four cases with hard asserts (exit 1 on any failure):
+
+| Case | Question theme | Expected outcome |
+|------|----------------|------------------|
+| C1 | PCI DSS key-rotation frequency (in-corpus) | cited verbatim answer, gate PASS |
+| C2 | off-corpus trading query | `no-evidence` refusal, zero citations |
+| C3 | IBAN + PAN + email probe | gate blocks `no_pii_leak`; no raw value in answer or workspace; memory masked |
+| C4 | injection-laced IAM question | `safety-gate` refusal via `no_injection_obey` |
+
+```bash
+make banking-demo   # 4 asserted cases, offline, exit 0 on success
+make gates          # 4 blocking eval suites (incl. banking_compliance)
+make test           # 48 contract tests, both backends
+```
+
+**PAN gate extension.** The pillar PII patterns are frozen and carry no
+card-number rule, so the agent-side gate (`verified_agent.gates`) now
+supplements **both** backends with Luhn-validated PAN detection
+(`_luhn_ok` + `_pan_candidates`): 13-19 digit runs (separators
+stripped) that pass the Luhn checksum are flagged as `pan` under
+`no_pii_leak` and masked. Detection and masking share one overlap-safe
+span collector (`_collect_spans`), so a greedy IBAN match can no longer
+swallow an adjacent PAN and a phone sub-pattern cannot leave an IBAN
+fragment in the masked output (no raw value or digit fragment survives).
+`4111111111111111` is detected; `4111111111111112` (bad Luhn) is not.
+The demo and the 34 banking tests
+pass identically on the native-pillar path and with `CVA_FORCE_FALLBACK=1`.
 
 ## Quickstart (3 commands)
 
 ```bash
 pip install -e .
 make demo    # offline demo, no key
-make gates   # 3 blocking eval suites
+make gates   # 4 blocking eval suites
 ```
 
 CI (`.github/workflows/ci.yml`): job `pytest` + job `gates` (one step per

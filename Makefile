@@ -4,7 +4,7 @@
 
 PYTHON := $(shell if [ -x $(HOME)/ai_env/bin/python ]; then echo $(HOME)/ai_env/bin/python; else echo python3; fi)
 
-.PHONY: demo test eval gates pillars all clean
+.PHONY: demo banking-demo test eval gates pillars all clean
 
 pillars:
 	$(PYTHON) -m pip install -e ".[pillars]" || echo "pillars unavailable offline, using stdlib fallback"
@@ -12,13 +12,16 @@ pillars:
 demo:
 	$(PYTHON) demo/demo.py
 
+banking-demo:
+	$(PYTHON) examples/banking-compliance/demo_banking.py
+
 test:
 	$(PYTHON) -m pytest -v
 
 eval: gates
 
 gates:
-	@for suite in evals/non_regression.json evals/schema.json evals/tripwires.json; do \
+	@for suite in evals/non_regression.json evals/schema.json evals/tripwires.json evals/banking_compliance.json; do \
 		if $(PYTHON) -c "import llm_eval" 2>/dev/null && command -v llm-eval >/dev/null 2>&1; then \
 			echo "== llm-eval run $$suite"; \
 			llm-eval run "$$suite" --report report.md --json report.json || exit 1; \
@@ -31,5 +34,6 @@ gates:
 all: test gates demo
 
 clean:
-	rm -rf report.md report.json src/*.egg-info .pytest_cache tests/__pycache__ src/verified_agent/__pycache__ demo/__pycache__
+	rm -rf report.md report.json src/*.egg-info .pytest_cache tests/__pycache__ src/verified_agent/__pycache__ demo/__pycache__ examples/banking-compliance/__pycache__
+	find examples -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null; true
 	find . -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null; true
