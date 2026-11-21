@@ -23,7 +23,7 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=7.0.0"]
 pillars = [
-  "agent-context-bridge==0.3.0",
+  "agent-context-bridge==0.3.2",
   "cited-rag==0.1.1",
   "llm-eval-ci==0.1.0",
 ]
